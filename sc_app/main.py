@@ -183,66 +183,72 @@ async def verify_phone_code(request: VerifyPhoneRequest):
 @app.post('/assistant/analyze')
 async def assistant_analyze(payload: Dict):
     """
-    Enterprise-grade LLM handler with native model routing and offline degradation.
+    Groq API LLM Handler - Ultra-low latency LPU processing.
     """
     try:
         h_item = payload.get('history_item') or {}
         question = payload.get('question') or 'Analyze these results.'
-        llm_key = os.getenv('LLM_API_KEY')
+        
+        # Check for GROQ key first, fallback to LLM key if user didn't rename it
+        llm_key = os.getenv('GROQ_API_KEY') or os.getenv('LLM_API_KEY')
         
         pred = h_item.get('prediction', 'No image analyzed')
         conf = h_item.get('confidence', 'N/A')
 
-        # The Ultimate Safety Net: If the AI completely fails, return this safe, professional text.
         offline_fallback = (
             f"**Automated Clinical Note:**\n"
             f"Prediction: {pred} (Confidence: {conf}%).\n\n"
             f"⚠️ *Our live AI servers are experiencing high traffic. Please note that this tool is for screening purposes only. "
-            f"Based on your results, we strongly advise scheduling an appointment with a certified dermatologist for a professional biopsy and diagnosis.*"
+            f"Based on your results, we strongly advise scheduling an appointment with a certified dermatologist.*"
         )
 
         if not llm_key: 
-            return {"assistant_text": offline_fallback}
+            return {"assistant_text": "Assistant Error: Groq API Key not configured in environment variables."}
 
         headers = {
             "Authorization": f"Bearer {llm_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://oncodetect.com", 
-            "X-Title": "OncoDetect Clinical App"
+            "Content-Type": "application/json"
         }
 
-        # NATIVE ROUTING: We pass an array of models. OpenRouter will instantly 
-        # try them from top to bottom until one works.
-        chat_data = {
-            "models": [
-                "google/gemini-2.0-flash-lite-preview-02-05:free", # Highly available 
-                "meta-llama/llama-3.1-8b-instruct:free",           # Excellent reasoning
-                "mistralai/mistral-7b-instruct:free",              # Solid backup
-                "openchat/openchat-7b:free",
-                "huggingfaceh4/zephyr-7b-beta:free"
-            ],
-            "route": "fallback", # Instructs OpenRouter to auto-failover
-            "messages": [
-                {"role": "system", "content": "You are OncoDetect Clinical Assistant. Explain results concisely and professionally. If no image is analyzed, answer general skin health questions."},
-                {"role": "user", "content": f"Current Analysis: {pred} (Confidence: {conf}%). Question: {question}"}
-            ]
-        }
+        def fetch_groq(model_id: str):
+            chat_data = {
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": "You are OncoDetect Clinical Assistant. Explain results concisely and professionally. If no image is analyzed, answer general skin health questions."},
+                    {"role": "user", "content": f"Current Analysis: {pred} (Confidence: {conf}%). Question: {question}"}
+                ]
+            }
+            # Short timeout since Groq LPUs are nearly instantaneous
+            return requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=chat_data, timeout=10)
 
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=chat_data, timeout=20)
+        # Primary and Fallback models hosted on Groq
+        primary_model = "llama-3.1-8b-instant"
+        fallback_model = "gemma2-9b-it"
+
+        r = fetch_groq(primary_model)
         
-        # Safely attempt to parse the JSON. If the server returned an HTML error page, this triggers the except block.
-        res = r.json()
-        
+        try:
+            res = r.json()
+        except ValueError:
+            return {"assistant_text": offline_fallback}
+
+        # Python-level failover if Groq throws a rate limit or internal error
+        if 'error' in res:
+            logger.warning(f"Groq primary model failed: {res.get('error')}. Trying fallback.")
+            r = fetch_groq(fallback_model)
+            try:
+                res = r.json()
+            except ValueError:
+                return {"assistant_text": offline_fallback}
+
         if 'choices' in res and len(res['choices']) > 0:
             return {"assistant_text": res['choices'][0]['message']['content']}
         
-        # If OpenRouter responded cleanly but said ALL models are down
-        logger.warning(f"OpenRouter exhausted all models: {res.get('error', {}).get('message', 'Unknown Error')}")
+        logger.error(f"Groq API Error: {res.get('error', {}).get('message', 'Unknown Error')}")
         return {"assistant_text": offline_fallback}
 
-    except (requests.exceptions.Timeout, requests.exceptions.RequestException, ValueError) as e:
-        # Catches Timeouts, DNS failures, and Nginx HTML 502/504 errors
-        logger.error(f"LLM Network/Parsing Error: {e}")
+    except (requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+        logger.error(f"Groq Network Error: {e}")
         return {"assistant_text": offline_fallback}
     except Exception as e:
         logger.exception("Fatal Assistant Error")
