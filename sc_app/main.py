@@ -137,7 +137,58 @@ vision_transform = transforms.Compose([
 ])
 
 # ==============================================================================
-# 5. ENDPOINTS
+# 5. HEATMAP GENERATOR (Memory-Safe & OpenCV-Free)
+# ==============================================================================
+def generate_heatmap(img_tensor, ai_model):
+    """
+    Extracts spatial activation maps without triggering OOM memory spikes.
+    Applies a native mathematical JET colormap to avoid heavy OpenCV dependencies.
+    """
+    try:
+        # Extract deep spatial features from the Timm vision backbone
+        features = ai_model.vision.forward_features(img_tensor)
+        
+        # Resolve dimensions based on CNN vs ViT architecture
+        if features.dim() == 4: # CNN Architecture [1, Channels, Height, Width]
+            spatial_map = features.mean(dim=1, keepdim=True) 
+        elif features.dim() == 3: # ViT Architecture [1, Tokens, Channels]
+            N, C = features.shape[1], features.shape[2]
+            hw = int(np.sqrt(N))
+            if hw * hw == N:
+                spatial_map = features.mean(dim=2).view(1, 1, hw, hw)
+            elif hw * hw == N - 1: # Adjust for class token
+                spatial_map = features[:, 1:, :].mean(dim=2).view(1, 1, hw, hw)
+            else:
+                return None
+        else:
+            return None
+        
+        # Isolate and Normalize map array
+        heat = spatial_map[0, 0].detach().cpu().numpy()
+        heat = np.maximum(heat, 0)
+        heat = (heat - heat.min()) / (heat.max() - heat.min() + 1e-8)
+        
+        # Scale to 224x224 smoothly using PIL
+        heat_img = Image.fromarray(np.uint8(255 * heat)).resize((224, 224), Image.BICUBIC)
+        heat_val = np.array(heat_img) / 255.0
+        
+        # Native mathematical JET Colormap (Red/Yellow/Green/Blue)
+        cmap = np.zeros((224, 224, 3), dtype=np.uint8)
+        cmap[:,:,0] = np.clip(4 * heat_val - 1.5, 0, 1) * 255 # R
+        cmap[:,:,1] = (np.clip(4 * heat_val - 0.5, 0, 1) - np.clip(4 * heat_val - 2.5, 0, 1)) * 255 # G
+        cmap[:,:,2] = np.clip(1.5 - 4 * heat_val, 0, 1) * 255 # B
+        
+        # Encode to Base64
+        buffered = io.BytesIO()
+        Image.fromarray(cmap).save(buffered, format="JPEG", quality=85)
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+    except Exception as e:
+        logger.warning(f"Heatmap extraction failed gracefully: {e}")
+        return None
+
+# ==============================================================================
+# 6. ENDPOINTS
 # ==============================================================================
 
 @app.get("/health")
@@ -189,7 +240,7 @@ async def assistant_analyze(payload: Dict):
         h_item = payload.get('history_item') or {}
         question = payload.get('question') or 'Analyze these results.'
         
-        # Check for GROQ key first, fallback to LLM key if user didn't rename it
+        # Check for GROQ key first, fallback to LLM key
         llm_key = os.getenv('GROQ_API_KEY') or os.getenv('LLM_API_KEY')
         
         pred = h_item.get('prediction', 'No image analyzed')
@@ -218,10 +269,8 @@ async def assistant_analyze(payload: Dict):
                     {"role": "user", "content": f"Current Analysis: {pred} (Confidence: {conf}%). Question: {question}"}
                 ]
             }
-            # Short timeout since Groq LPUs are nearly instantaneous
             return requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=chat_data, timeout=10)
 
-        # Primary and Fallback models hosted on Groq
         primary_model = "llama-3.1-8b-instant"
         fallback_model = "gemma2-9b-it"
 
@@ -232,7 +281,6 @@ async def assistant_analyze(payload: Dict):
         except ValueError:
             return {"assistant_text": offline_fallback}
 
-        # Python-level failover if Groq throws a rate limit or internal error
         if 'error' in res:
             logger.warning(f"Groq primary model failed: {res.get('error')}. Trying fallback.")
             r = fetch_groq(fallback_model)
@@ -263,7 +311,11 @@ async def predict(request: Request, file: UploadFile = File(None), age: str = Fo
             meta = PatientMetadata(age=age, gender=gender, location=location)
         else:
             body = await request.json()
-            img_b64, meta = body['image'], PatientMetadata(**body['metadata'])
+            img_b64, body_meta = body['image'], body.get('metadata', {})
+            # Ensure metadata resolves correctly regardless of nested JSON structure
+            if isinstance(body_meta, str):
+                body_meta = json.loads(body_meta)
+            meta = PatientMetadata(**body_meta)
 
         img_str = img_b64.split(',')[-1]
         img = Image.open(io.BytesIO(base64.b64decode(img_str))).convert("RGB")
@@ -282,11 +334,15 @@ async def predict(request: Request, file: UploadFile = File(None), age: str = Fo
         raw_class = CLASS_NAMES[idx.item()]
         breakdown = {CLASS_NAMES[i]: round(probs[i].item() * 100, 2) for i in range(NUM_CLASSES)}
 
+        # INJECTING HEATMAP GENERATOR
+        heatmap_base64 = generate_heatmap(img_t, model)
+
         res = {
             "id": str(uuid.uuid4())[:8],
             "prediction": FRIENDLY_NAMES.get(raw_class, raw_class),
             "confidence": round(conf.item() * 100, 2),
             "confidence_breakdown": breakdown,
+            "heatmap": heatmap_base64, # Safely passes None if generation fails
             "timestamp": datetime.now().isoformat(),
             "age": meta.age, "gender": meta.gender, "location": meta.location
         }
