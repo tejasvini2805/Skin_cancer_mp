@@ -50,7 +50,7 @@ LOC_CATEGORIES = [
 NUM_META_FEATURES = 1 + len(SEX_CATEGORIES) + len(LOC_CATEGORIES)
 
 # ==============================================================================
-# 2. MODEL ARCHITECTURE (Exactly same as Training)
+# 2. MODEL ARCHITECTURE
 # ==============================================================================
 class EdgeFusionV3Net(nn.Module):
     def __init__(self, num_classes, num_meta_features):
@@ -83,46 +83,102 @@ class EdgeFusionV3Net(nn.Module):
         return self.classifier(fused)
 
 # ==============================================================================
-# 3. SETUP & APP
+# 3. GLOBAL STATE & SCHEMAS
 # ==============================================================================
-app = FastAPI(title="OncoDetect API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
 model = None
 prediction_history = []
+verification_codes_phone: Dict[str, str] = {}
 HISTORY_PATH = os.path.join(os.path.dirname(__file__), 'data', 'history.json')
-
-@app.on_event("startup")
-async def startup():
-    global model, prediction_history
-    # Load History
-    try:
-        if os.path.exists(HISTORY_PATH):
-            with open(HISTORY_PATH, 'r') as f: prediction_history = json.load(f)
-    except: pass
-    # Load Model
-    model = EdgeFusionV3Net(NUM_CLASSES, NUM_META_FEATURES)
-    if os.path.exists(MODEL_SAVE_PATH):
-        model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location="cpu"))
-        model.eval()
-    logger.info("✓ Backend Startup Ready")
-
-vision_transform = transforms.Compose([
-    transforms.Resize((224, 224)), transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-])
 
 class PatientMetadata(BaseModel):
     age: str
     gender: str
     location: str
 
+class AssessmentRequest(BaseModel):
+    image: str 
+    metadata: PatientMetadata
+
+class PhoneRequest(BaseModel):
+    phone_number: str
+
+class VerifyPhoneRequest(BaseModel):
+    phone_number: str
+    code: str
+
 # ==============================================================================
-# 4. ENDPOINTS
+# 4. APP SETUP & STARTUP
+# ==============================================================================
+app = FastAPI(title="OncoDetect API")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+@app.on_event("startup")
+async def startup():
+    global model, prediction_history
+    try:
+        os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+        if os.path.exists(HISTORY_PATH):
+            with open(HISTORY_PATH, 'r') as f:
+                prediction_history = json.load(f)
+    except:
+        prediction_history = []
+    
+    model = EdgeFusionV3Net(NUM_CLASSES, NUM_META_FEATURES)
+    if os.path.exists(MODEL_SAVE_PATH):
+        model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location="cpu"))
+        model.eval()
+        logger.info("✓ Model loaded on CPU")
+    else:
+        logger.error(f"✗ Model file {MODEL_SAVE_PATH} not found")
+
+vision_transform = transforms.Compose([
+    transforms.Resize((224, 224)), transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+])
+
+# ==============================================================================
+# 5. ENDPOINTS
 # ==============================================================================
 
 @app.get("/health")
-def health(): return {"status": "healthy"}
+def health(): return {"status": "healthy", "device": DEVICE}
+
+@app.post("/send_sms_code")
+async def send_sms_code(request: PhoneRequest):
+    code = f"{random.randint(100000, 999999)}"
+    verification_codes_phone[request.phone_number] = code
+    
+    if os.getenv("DUMMY_SMS") == '1':
+        logger.info(f"DUMMY SMS to {request.phone_number}: {code}")
+        return {"status": "code_sent", "code": code}
+    
+    try:
+        sid = os.getenv('TWILIO_ACCOUNT_SID')
+        token = os.getenv('TWILIO_AUTH_TOKEN')
+        from_num = os.getenv('TWILIO_FROM_NUMBER')
+        
+        if not all([sid, token, from_num]):
+            raise HTTPException(status_code=500, detail="Twilio credentials missing")
+
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+        data = {'From': from_num, 'To': request.phone_number, 'Body': f"Your OncoDetect code is: {code}"}
+        resp = requests.post(url, data=data, auth=(sid, token), timeout=10)
+        
+        if resp.status_code < 300:
+            return {"status": "code_sent"}
+        else:
+            logger.error(f"Twilio Error: {resp.text}")
+            raise HTTPException(status_code=500, detail="Twilio gateway error")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/verify_phone_code")
+async def verify_phone_code(request: VerifyPhoneRequest):
+    stored = verification_codes_phone.get(request.phone_number)
+    if stored and stored == request.code:
+        verification_codes_phone.pop(request.phone_number, None)
+        return {"status": "verified"}
+    raise HTTPException(status_code=400, detail="Invalid verification code")
 
 @app.post('/assistant/analyze')
 async def assistant_analyze(payload: Dict):
@@ -131,7 +187,7 @@ async def assistant_analyze(payload: Dict):
         question = payload.get('question', 'Analyze these results.')
         llm_key = os.getenv('LLM_API_KEY')
         
-        if not llm_key: return {"assistant_text": "Assistant Error: API Key not set in Render."}
+        if not llm_key: return {"assistant_text": "Assistant Error: API Key not set."}
 
         headers = {"Authorization": f"Bearer {llm_key}", "Content-Type": "application/json"}
         chat_data = {
@@ -145,65 +201,15 @@ async def assistant_analyze(payload: Dict):
         r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=chat_data, timeout=15)
         res = r.json()
         
-        # SAFELY check for choices to avoid the 'choices' error
         if 'choices' in res:
             return {"assistant_text": res['choices'][0]['message']['content']}
-        else:
-            error_msg = res.get('error', {}).get('message', 'Unknown API Error')
-            return {"assistant_text": f"AI Error: {error_msg}"}
+        return {"assistant_text": f"AI Error: {res.get('error', {}).get('message', 'Unknown response format')}"}
     except Exception as e:
         return {"assistant_text": f"Connection Error: {str(e)}"}
-# --- Add these after your /assistant/analyze endpoint ---
-
-@app.post("/send_sms_code")
-async def send_sms_code(request: PhoneRequest):
-    # Generate a 6-digit code
-    code = f"{random.randint(100000, 999999)}"
-    
-    # Store it in memory (Note: In production, use Redis or a DB)
-    verification_codes_phone[request.phone_number] = code
-    
-    # Check for Dummy Mode (Dev testing)
-    if os.getenv("DUMMY_SMS") == '1':
-        logger.info(f"DUMMY SMS to {request.phone_number}: {code}")
-        return {"status": "code_sent", "code": code}
-    
-    # Real Twilio Logic
-    try:
-        url = f"https://api.twilio.com/2010-04-01/Accounts/{os.getenv('TWILIO_ACCOUNT_SID')}/Messages.json"
-        data = {
-            'From': os.getenv('TWILIO_FROM_NUMBER'),
-            'To': request.phone_number,
-            'Body': f"Your OncoDetect code is: {code}"
-        }
-        resp = requests.post(
-            url, 
-            data=data, 
-            auth=(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN')),
-            timeout=10
-        )
-        if resp.status_code < 300:
-            return {"status": "code_sent"}
-        else:
-            logger.error(f"Twilio Error: {resp.text}")
-            raise HTTPException(status_code=500, detail="Failed to send SMS via Twilio")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/verify_phone_code")
-async def verify_phone_code(request: VerifyPhoneRequest):
-    stored_code = verification_codes_phone.get(request.phone_number)
-    if stored_code and stored_code == request.code:
-        # Success! Remove code so it can't be reused
-        verification_codes_phone.pop(request.phone_number, None)
-        return {"status": "verified"}
-    
-    raise HTTPException(status_code=400, detail="Invalid or expired verification code")
 
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(None), age: str = Form("0"), gender: str = Form("unknown"), location: str = Form("unknown")):
     try:
-        # Handle file or JSON
         if file:
             content = await file.read()
             img_b64 = f"data:image/png;base64,{base64.b64encode(content).decode()}"
@@ -212,7 +218,6 @@ async def predict(request: Request, file: UploadFile = File(None), age: str = Fo
             body = await request.json()
             img_b64, meta = body['image'], PatientMetadata(**body['metadata'])
 
-        # INFERENCE
         img_str = img_b64.split(',')[-1]
         img = Image.open(io.BytesIO(base64.b64decode(img_str))).convert("RGB")
         img_t = vision_transform(img).unsqueeze(0)
@@ -228,8 +233,6 @@ async def predict(request: Request, file: UploadFile = File(None), age: str = Fo
             conf, idx = torch.max(probs, 0)
 
         raw_class = CLASS_NAMES[idx.item()]
-        
-        # Restore full breakdown
         breakdown = {CLASS_NAMES[i]: round(probs[i].item() * 100, 2) for i in range(NUM_CLASSES)}
 
         res = {
@@ -242,9 +245,7 @@ async def predict(request: Request, file: UploadFile = File(None), age: str = Fo
         }
         
         prediction_history.append(res)
-        # Save history
         try:
-            os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
             with open(HISTORY_PATH, 'w') as f: json.dump(prediction_history[-100:], f)
         except: pass
         
@@ -254,7 +255,8 @@ async def predict(request: Request, file: UploadFile = File(None), age: str = Fo
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/history")
-async def get_history(): return sorted(prediction_history, key=lambda x: x['timestamp'], reverse=True)[:50]
+async def get_history(): 
+    return sorted(prediction_history, key=lambda x: x['timestamp'], reverse=True)[:50]
 
 @app.get("/stats")
 async def get_stats():
