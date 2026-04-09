@@ -182,28 +182,60 @@ async def verify_phone_code(request: VerifyPhoneRequest):
 
 @app.post('/assistant/analyze')
 async def assistant_analyze(payload: Dict):
+    """
+    Robust LLM handler with fallback routing and increased timeouts.
+    """
     try:
         h_item = payload.get('history_item', {})
         question = payload.get('question', 'Analyze these results.')
         llm_key = os.getenv('LLM_API_KEY')
         
-        if not llm_key: return {"assistant_text": "Assistant Error: API Key not set."}
+        if not llm_key: 
+            return {"assistant_text": "Assistant Error: API Key not configured."}
 
-        headers = {"Authorization": f"Bearer {llm_key}", "Content-Type": "application/json"}
-        chat_data = {
-            "model": "meta-llama/llama-3.1-8b-instruct:free",
-            "messages": [
-                {"role": "system", "content": "You are OncoDetect Clinical Assistant. Explain results concisely."},
-                {"role": "user", "content": f"Prediction: {h_item.get('prediction')}. Confidence: {h_item.get('confidence')}%. User Question: {question}"}
-            ]
+        # OpenRouter prioritizes requests with these headers
+        headers = {
+            "Authorization": f"Bearer {llm_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://oncodetect.com", 
+            "X-Title": "OncoDetect Clinical App"
         }
 
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=chat_data, timeout=15)
+        def fetch_llm(model_id: str):
+            chat_data = {
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": "You are OncoDetect Clinical Assistant. Explain results concisely and professionally."},
+                    {"role": "user", "content": f"Prediction: {h_item.get('prediction')}. Confidence: {h_item.get('confidence')}%. User Question: {question}"}
+                ]
+            }
+            # 30-second timeout for slow free-tier inference
+            return requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=chat_data, timeout=30)
+
+        # Primary Model (Llama 3.1 8B)
+        primary_model = "meta-llama/llama-3.1-8b-instruct:free"
+        # Fallback Model (Google Gemma 2 9B or Mistral)
+        fallback_model = "google/gemma-2-9b-it:free"
+
+        r = fetch_llm(primary_model)
         res = r.json()
+
+        # If OpenRouter returns an endpoint routing error, catch it and use fallback
+        if 'error' in res and 'endpoints' in res.get('error', {}).get('message', '').lower():
+            logger.warning(f"Primary LLM ({primary_model}) unavailable. Switching to fallback ({fallback_model}).")
+            r = fetch_llm(fallback_model)
+            res = r.json()
         
+        # Parse successful response
         if 'choices' in res:
             return {"assistant_text": res['choices'][0]['message']['content']}
-        return {"assistant_text": f"AI Error: {res.get('error', {}).get('message', 'Unknown response format')}"}
+        
+        # If both fail, return exact error for debugging
+        error_msg = res.get('error', {}).get('message', 'Unknown API Error')
+        return {"assistant_text": f"AI Engine temporarily unavailable: {error_msg}"}
+        
+    except requests.exceptions.Timeout:
+        return {"assistant_text": "Connection Error: The AI is taking too long to respond due to high traffic. Please try again."}
     except Exception as e:
         return {"assistant_text": f"Connection Error: {str(e)}"}
 
