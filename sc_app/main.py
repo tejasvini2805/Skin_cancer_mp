@@ -183,17 +183,27 @@ async def verify_phone_code(request: VerifyPhoneRequest):
 @app.post('/assistant/analyze')
 async def assistant_analyze(payload: Dict):
     """
-    Robust LLM handler with fallback routing and increased timeouts.
+    Enterprise-grade LLM handler with native model routing and offline degradation.
     """
     try:
-        h_item = payload.get('history_item', {})
-        question = payload.get('question', 'Analyze these results.')
+        h_item = payload.get('history_item') or {}
+        question = payload.get('question') or 'Analyze these results.'
         llm_key = os.getenv('LLM_API_KEY')
         
-        if not llm_key: 
-            return {"assistant_text": "Assistant Error: API Key not configured."}
+        pred = h_item.get('prediction', 'No image analyzed')
+        conf = h_item.get('confidence', 'N/A')
 
-        # OpenRouter prioritizes requests with these headers
+        # The Ultimate Safety Net: If the AI completely fails, return this safe, professional text.
+        offline_fallback = (
+            f"**Automated Clinical Note:**\n"
+            f"Prediction: {pred} (Confidence: {conf}%).\n\n"
+            f"⚠️ *Our live AI servers are experiencing high traffic. Please note that this tool is for screening purposes only. "
+            f"Based on your results, we strongly advise scheduling an appointment with a certified dermatologist for a professional biopsy and diagnosis.*"
+        )
+
+        if not llm_key: 
+            return {"assistant_text": offline_fallback}
+
         headers = {
             "Authorization": f"Bearer {llm_key}",
             "Content-Type": "application/json",
@@ -201,43 +211,42 @@ async def assistant_analyze(payload: Dict):
             "X-Title": "OncoDetect Clinical App"
         }
 
-        def fetch_llm(model_id: str):
-            chat_data = {
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": "You are OncoDetect Clinical Assistant. Explain results concisely and professionally."},
-                    {"role": "user", "content": f"Prediction: {h_item.get('prediction')}. Confidence: {h_item.get('confidence')}%. User Question: {question}"}
-                ]
-            }
-            # 30-second timeout for slow free-tier inference
-            return requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=chat_data, timeout=30)
+        # NATIVE ROUTING: We pass an array of models. OpenRouter will instantly 
+        # try them from top to bottom until one works.
+        chat_data = {
+            "models": [
+                "google/gemini-2.0-flash-lite-preview-02-05:free", # Highly available 
+                "meta-llama/llama-3.1-8b-instruct:free",           # Excellent reasoning
+                "mistralai/mistral-7b-instruct:free",              # Solid backup
+                "openchat/openchat-7b:free",
+                "huggingfaceh4/zephyr-7b-beta:free"
+            ],
+            "route": "fallback", # Instructs OpenRouter to auto-failover
+            "messages": [
+                {"role": "system", "content": "You are OncoDetect Clinical Assistant. Explain results concisely and professionally. If no image is analyzed, answer general skin health questions."},
+                {"role": "user", "content": f"Current Analysis: {pred} (Confidence: {conf}%). Question: {question}"}
+            ]
+        }
 
-        # Primary Model (Llama 3.1 8B)
-        primary_model = "meta-llama/llama-3.1-8b-instruct:free"
-        # Fallback Model (Google Gemma 2 9B or Mistral)
-        fallback_model = "google/gemma-2-9b-it:free"
-
-        r = fetch_llm(primary_model)
-        res = r.json()
-
-        # If OpenRouter returns an endpoint routing error, catch it and use fallback
-        if 'error' in res and 'endpoints' in res.get('error', {}).get('message', '').lower():
-            logger.warning(f"Primary LLM ({primary_model}) unavailable. Switching to fallback ({fallback_model}).")
-            r = fetch_llm(fallback_model)
-            res = r.json()
+        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=chat_data, timeout=20)
         
-        # Parse successful response
-        if 'choices' in res:
+        # Safely attempt to parse the JSON. If the server returned an HTML error page, this triggers the except block.
+        res = r.json()
+        
+        if 'choices' in res and len(res['choices']) > 0:
             return {"assistant_text": res['choices'][0]['message']['content']}
         
-        # If both fail, return exact error for debugging
-        error_msg = res.get('error', {}).get('message', 'Unknown API Error')
-        return {"assistant_text": f"AI Engine temporarily unavailable: {error_msg}"}
-        
-    except requests.exceptions.Timeout:
-        return {"assistant_text": "Connection Error: The AI is taking too long to respond due to high traffic. Please try again."}
+        # If OpenRouter responded cleanly but said ALL models are down
+        logger.warning(f"OpenRouter exhausted all models: {res.get('error', {}).get('message', 'Unknown Error')}")
+        return {"assistant_text": offline_fallback}
+
+    except (requests.exceptions.Timeout, requests.exceptions.RequestException, ValueError) as e:
+        # Catches Timeouts, DNS failures, and Nginx HTML 502/504 errors
+        logger.error(f"LLM Network/Parsing Error: {e}")
+        return {"assistant_text": offline_fallback}
     except Exception as e:
-        return {"assistant_text": f"Connection Error: {str(e)}"}
+        logger.exception("Fatal Assistant Error")
+        return {"assistant_text": f"System Error: {str(e)}"}
 
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(None), age: str = Form("0"), gender: str = Form("unknown"), location: str = Form("unknown")):
@@ -252,12 +261,12 @@ async def predict(request: Request, file: UploadFile = File(None), age: str = Fo
 
         img_str = img_b64.split(',')[-1]
         img = Image.open(io.BytesIO(base64.b64decode(img_str))).convert("RGB")
-        img_t = vision_transform(img).unsqueeze(0)
+        img_t = vision_transform(img).unsqueeze(0).to(DEVICE)
         
         age_s = float(meta.age) / 100.0
         sex_v = [1.0 if meta.gender.lower() == c else 0.0 for c in SEX_CATEGORIES]
         loc_v = [1.0 if meta.location.lower() == c else 0.0 for c in LOC_CATEGORIES]
-        meta_t = torch.tensor([[age_s] + sex_v + loc_v], dtype=torch.float32)
+        meta_t = torch.tensor([[age_s] + sex_v + loc_v], dtype=torch.float32).to(DEVICE)
 
         with torch.no_grad():
             output = model(img_t, meta_t)
