@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -26,10 +26,20 @@ logger = logging.getLogger(__name__)
 # ==============================================================================
 # 1. CONFIGURATION
 # ==============================================================================
-DEVICE = "cpu" # Force CPU for Render stability
+DEVICE = "cpu"
 MODEL_SAVE_PATH = os.getenv("MODEL_SAVE_PATH", "edgefusion_v3_hybrid_champion.pth")
 
 CLASS_NAMES = ['AKIEC', 'BCC', 'BKL', 'DF', 'MEL', 'NV', 'SCC', 'VASC']
+FRIENDLY_NAMES = {
+    "AKIEC": "Actinic Keratosis",
+    "BCC": "Basal Cell Carcinoma",
+    "BKL": "Benign Keratosis",
+    "DF": "Dermatofibroma",
+    "MEL": "Melanoma",
+    "NV": "Nevus",
+    "SCC": "Squamous Cell Carcinoma",
+    "VASC": "Vascular Lesion"
+}
 NUM_CLASSES = len(CLASS_NAMES)
 
 SEX_CATEGORIES = ['female', 'male', 'unknown']
@@ -40,7 +50,7 @@ LOC_CATEGORIES = [
 NUM_META_FEATURES = 1 + len(SEX_CATEGORIES) + len(LOC_CATEGORIES)
 
 # ==============================================================================
-# 2. MODEL ARCHITECTURE
+# 2. MODEL ARCHITECTURE (Exactly same as Training)
 # ==============================================================================
 class EdgeFusionV3Net(nn.Module):
     def __init__(self, num_classes, num_meta_features):
@@ -48,231 +58,163 @@ class EdgeFusionV3Net(nn.Module):
         self.vision = timm.create_model('efficientformerv2_s1', pretrained=False, num_classes=0)
         with torch.no_grad():
             dummy_img = torch.randn(1, 3, 224, 224)
-            vision_out_features = self.vision(dummy_img).shape[1]
+            v_out = self.vision(dummy_img).shape[1]
 
         self.meta_mlp = nn.Sequential(
-            nn.Linear(num_meta_features, 32),
-            nn.ReLU(),
-            nn.BatchNorm1d(32),
-            nn.Dropout(0.2),
-            nn.Linear(32, 32),
-            nn.ReLU()
+            nn.Linear(num_meta_features, 32), nn.ReLU(),
+            nn.BatchNorm1d(32), nn.Dropout(0.2),
+            nn.Linear(32, 32), nn.ReLU()
         )
-
-        combined_dim = vision_out_features + 32
+        combined_dim = v_out + 32
         self.se_gate = nn.Sequential(
-            nn.Linear(combined_dim, combined_dim // 4),
-            nn.ReLU(),
-            nn.Linear(combined_dim // 4, combined_dim),
-            nn.Sigmoid()
+            nn.Linear(combined_dim, combined_dim // 4), nn.ReLU(),
+            nn.Linear(combined_dim // 4, combined_dim), nn.Sigmoid()
         )
-
         self.classifier = nn.Sequential(
-            nn.Linear(combined_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Linear(combined_dim, 256), nn.ReLU(), nn.Dropout(0.3),
             nn.Linear(256, num_classes)
         )
 
     def forward(self, img, meta):
         v_feat = self.vision(img)
         m_feat = self.meta_mlp(meta)
-        fused_raw = torch.cat((v_feat, m_feat), dim=1)
-        attention_weights = self.se_gate(fused_raw)
-        fused_gated = fused_raw * attention_weights
-        return self.classifier(fused_gated)
+        fused = torch.cat((v_feat, m_feat), dim=1)
+        fused = fused * self.se_gate(fused)
+        return self.classifier(fused)
 
 # ==============================================================================
-# 3. DATA PERSISTENCE
-# ==============================================================================
-prediction_history: List[Dict] = []
-verification_codes_phone: Dict[str, str] = {}
-HISTORY_PATH = os.path.join(os.path.dirname(__file__), 'data', 'history.json')
-
-def load_history_from_disk():
-    global prediction_history
-    try:
-        os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
-        if os.path.exists(HISTORY_PATH):
-            with open(HISTORY_PATH, 'r', encoding='utf-8') as hf:
-                prediction_history = json.load(hf)
-    except Exception: pass
-
-def save_history_to_disk():
-    try:
-        os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
-        with open(HISTORY_PATH, 'w', encoding='utf-8') as hf:
-            json.dump(prediction_history, hf, ensure_ascii=False, indent=2)
-    except Exception: pass
-
-# ==============================================================================
-# 4. FASTAPI SETUP
+# 3. SETUP & APP
 # ==============================================================================
 app = FastAPI(title="OncoDetect API")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Global model variable
 model = None
+prediction_history = []
+HISTORY_PATH = os.path.join(os.path.dirname(__file__), 'data', 'history.json')
 
 @app.on_event("startup")
-async def startup_event():
-    global model
-    load_history_from_disk()
+async def startup():
+    global model, prediction_history
+    # Load History
+    try:
+        if os.path.exists(HISTORY_PATH):
+            with open(HISTORY_PATH, 'r') as f: prediction_history = json.load(f)
+    except: pass
+    # Load Model
     model = EdgeFusionV3Net(NUM_CLASSES, NUM_META_FEATURES)
     if os.path.exists(MODEL_SAVE_PATH):
         model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location="cpu"))
         model.eval()
-        logger.info("✓ Model Loaded")
-    else:
-        logger.error("✗ Model file not found")
+    logger.info("✓ Backend Startup Ready")
 
 vision_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
+    transforms.Resize((224, 224)), transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
-# ==============================================================================
-# 5. SCHEMAS
-# ==============================================================================
 class PatientMetadata(BaseModel):
     age: str
     gender: str
     location: str
 
-class AssessmentRequest(BaseModel):
-    image: str 
-    metadata: PatientMetadata
-
-class PhoneRequest(BaseModel):
-    phone_number: str
-
-class VerifyPhoneRequest(BaseModel):
-    phone_number: str
-    code: str
-
 # ==============================================================================
-# 6. ENDPOINTS
+# 4. ENDPOINTS
 # ==============================================================================
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy", "device": DEVICE}
+def health(): return {"status": "healthy"}
 
-@app.post("/send_sms_code")
-async def send_sms_code(request: PhoneRequest):
-    code = f"{random.randint(100000, 999999)}"
-    verification_codes_phone[request.phone_number] = code
-    if os.getenv("DUMMY_SMS") == '1':
-        return {"status": "code_sent", "code": code}
-    
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{os.getenv('TWILIO_ACCOUNT_SID')}/Messages.json"
-    data = {'From': os.getenv('TWILIO_FROM_NUMBER'), 'To': request.phone_number, 'Body': f"Code: {code}"}
-    resp = requests.post(url, data=data, auth=(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN')))
-    return {"status": "code_sent"} if resp.status_code < 300 else JSONResponse(status_code=500, content={"detail": "SMS fail"})
-
-@app.post("/verify_phone_code")
-async def verify_phone_code(request: VerifyPhoneRequest):
-    if verification_codes_phone.get(request.phone_number) == request.code:
-        return {"status": "verified"}
-    raise HTTPException(status_code=400, detail="Invalid code")
-
-# --- THE MISSING ASSISTANT ENDPOINT ---
 @app.post('/assistant/analyze')
 async def assistant_analyze(payload: Dict):
     try:
-        history_item = payload.get('history_item', {})
-        question = payload.get('question', 'Explain these results.')
-        
+        h_item = payload.get('history_item', {})
+        question = payload.get('question', 'Analyze these results.')
         llm_key = os.getenv('LLM_API_KEY')
-        if not llm_key:
-            return {"assistant_text": "AI Assistant is not configured (Missing API Key)."}
+        
+        if not llm_key: return {"assistant_text": "Assistant Error: API Key not set in Render."}
 
-        headers = {
-            "Authorization": f"Bearer {llm_key}",
-            "Content-Type": "application/json"
-        }
-
-        chat_body = {
+        headers = {"Authorization": f"Bearer {llm_key}", "Content-Type": "application/json"}
+        chat_data = {
             "model": "meta-llama/llama-3.1-8b-instruct:free",
             "messages": [
-                {"role": "system", "content": "You are OncoDetect Clinical Assistant. Explain skin results clearly."},
-                {"role": "user", "content": f"Result: {history_item.get('prediction')} ({history_item.get('confidence')}%). Question: {question}"}
+                {"role": "system", "content": "You are OncoDetect Clinical Assistant. Explain results concisely."},
+                {"role": "user", "content": f"Prediction: {h_item.get('prediction')}. Confidence: {h_item.get('confidence')}%. User Question: {question}"}
             ]
         }
 
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=chat_body, timeout=15)
-        res_json = response.json()
-        return {"assistant_text": res_json['choices'][0]['message']['content']}
+        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=chat_data, timeout=15)
+        res = r.json()
+        
+        # SAFELY check for choices to avoid the 'choices' error
+        if 'choices' in res:
+            return {"assistant_text": res['choices'][0]['message']['content']}
+        else:
+            error_msg = res.get('error', {}).get('message', 'Unknown API Error')
+            return {"assistant_text": f"AI Error: {error_msg}"}
     except Exception as e:
-        return {"assistant_text": f"Assistant Error: {str(e)}"}
+        return {"assistant_text": f"Connection Error: {str(e)}"}
 
 @app.post("/predict")
-async def predict_lesion(request: Request, file: UploadFile = File(None), age: Optional[str] = Form(None), gender: Optional[str] = Form(None), location: Optional[str] = Form(None)):
+async def predict(request: Request, file: UploadFile = File(None), age: str = Form("0"), gender: str = Form("unknown"), location: str = Form("unknown")):
     try:
+        # Handle file or JSON
         if file:
             content = await file.read()
-            img_b64 = f"data:{file.content_type};base64,{base64.b64encode(content).decode()}"
-            meta = PatientMetadata(age=age or "0", gender=gender or "unknown", location=location or "unknown")
+            img_b64 = f"data:image/png;base64,{base64.b64encode(content).decode()}"
+            meta = PatientMetadata(age=age, gender=gender, location=location)
         else:
             body = await request.json()
-            ar = AssessmentRequest(**body)
-            img_b64, meta = ar.image, ar.metadata
+            img_b64, meta = body['image'], PatientMetadata(**body['metadata'])
 
-        result = run_inference(img_b64, meta)
-        prediction_history.append(result['history_item'])
-        save_history_to_disk()
-        return JSONResponse(content=result)
+        # INFERENCE
+        img_str = img_b64.split(',')[-1]
+        img = Image.open(io.BytesIO(base64.b64decode(img_str))).convert("RGB")
+        img_t = vision_transform(img).unsqueeze(0)
+        
+        age_s = float(meta.age) / 100.0
+        sex_v = [1.0 if meta.gender.lower() == c else 0.0 for c in SEX_CATEGORIES]
+        loc_v = [1.0 if meta.location.lower() == c else 0.0 for c in LOC_CATEGORIES]
+        meta_t = torch.tensor([[age_s] + sex_v + loc_v], dtype=torch.float32)
+
+        with torch.no_grad():
+            output = model(img_t, meta_t)
+            probs = torch.nn.functional.softmax(output, dim=1)[0]
+            conf, idx = torch.max(probs, 0)
+
+        raw_class = CLASS_NAMES[idx.item()]
+        
+        # Restore full breakdown
+        breakdown = {CLASS_NAMES[i]: round(probs[i].item() * 100, 2) for i in range(NUM_CLASSES)}
+
+        res = {
+            "id": str(uuid.uuid4())[:8],
+            "prediction": FRIENDLY_NAMES.get(raw_class, raw_class),
+            "confidence": round(conf.item() * 100, 2),
+            "confidence_breakdown": breakdown,
+            "timestamp": datetime.now().isoformat(),
+            "age": meta.age, "gender": meta.gender, "location": meta.location
+        }
+        
+        prediction_history.append(res)
+        # Save history
+        try:
+            os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+            with open(HISTORY_PATH, 'w') as f: json.dump(prediction_history[-100:], f)
+        except: pass
+        
+        return {**res, "history_item": res}
     except Exception as e:
-        logger.exception("Prediction failed")
+        logger.error(f"Prediction Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/history")
-async def get_history():
-    return sorted(prediction_history, key=lambda x: x['timestamp'], reverse=True)[:50]
+async def get_history(): return sorted(prediction_history, key=lambda x: x['timestamp'], reverse=True)[:50]
 
 @app.get("/stats")
 async def get_stats():
     if not prediction_history: return {"total_predictions": 0, "avg_confidence": 0}
     confs = [p['confidence'] for p in prediction_history]
     return {"total_predictions": len(prediction_history), "avg_confidence": round(sum(confs)/len(confs), 2)}
-
-# ==============================================================================
-# 7. INFERENCE ENGINE
-# ==============================================================================
-def run_inference(image_base64: str, metadata: PatientMetadata):
-    # Standardize image data
-    img_str = image_base64.split(',')[-1]
-    img = Image.open(io.BytesIO(base64.b64decode(img_str))).convert("RGB")
-    img_t = vision_transform(img).unsqueeze(0).to("cpu")
-
-    # Meta Vector
-    age_s = float(metadata.age) / 100.0
-    sex_v = [1.0 if metadata.gender.lower() == c else 0.0 for c in SEX_CATEGORIES]
-    loc_v = [1.0 if metadata.location.lower() == c else 0.0 for c in LOC_CATEGORIES]
-    meta_t = torch.tensor([[age_s] + sex_v + loc_v], dtype=torch.float32).to("cpu")
-
-    with torch.no_grad():
-        out = model(img_t, meta_t)
-        probs = torch.nn.functional.softmax(out, dim=1)[0]
-        conf, idx = torch.max(probs, 0)
-
-    raw_class = CLASS_NAMES[idx.item()]
-    res = {
-        "id": str(uuid.uuid4())[:8],
-        "prediction": raw_class, # Friendly name mapping can be added here
-        "confidence": round(conf.item() * 100, 2),
-        "timestamp": datetime.now().isoformat(),
-        "age": metadata.age, "gender": metadata.gender, "location": metadata.location
-    }
-    return {**res, "history_item": res}
 
 if __name__ == "__main__":
     import uvicorn
