@@ -1532,227 +1532,241 @@ const Metadata = ({ userData, setUserData, navigate }) => {
 };
 
 const Capture = ({ userData, navigate }) => {
-  const [image, setImage] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [camSuggestions, setCamSuggestions] = useState([]);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const [image, setImage] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  
+  // Real-time metrics state for AR guidance
+  const [metrics, setMetrics] = useState({ lighting: 'Good', focus: 'Sharp', ready: false });
+  
+  const videoRef = useRef(null);
+  const hiddenCanvasRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const frameIdRef = useRef(null);
 
-  const handleImageSelect = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 10 * 1024 * 1024) {
-        setError('Image size must be less than 10MB');
-        return;
-      }
-      
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setPreview(event.target.result);
-        setImage(file);
-        setError(null);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+  // EDGE PROCESSING: Analyze video frame for brightness and contrast
+  const analyzeFrame = () => {
+    if (!videoRef.current || !hiddenCanvasRef.current || !cameraActive) return;
+    
+    const video = videoRef.current;
+    const canvas = hiddenCanvasRef.current;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    
+    if (video.videoWidth > 0) {
+      // Draw a low-res version of the frame for hyper-fast processing (64x64 is sufficient for luminance)
+      ctx.drawImage(video, 0, 0, 64, 64);
+      const imageData = ctx.getImageData(0, 0, 64, 64).data;
+      
+      let totalLuminance = 0;
+      let minLum = 255;
+      let maxLum = 0;
 
-  const handleCapture = async () => {
-    if (!image || !preview) {
-      setError('Please select an image first');
-      return;
-    }
+      for (let i = 0; i < imageData.length; i += 4) {
+        // Standard relative luminance formula (Rec. 709)
+        const lum = 0.299 * imageData[i] + 0.587 * imageData[i + 1] + 0.114 * imageData[i + 2];
+        totalLuminance += lum;
+        if (lum < minLum) minLum = lum;
+        if (lum > maxLum) maxLum = lum;
+      }
+      
+      const avgLuminance = totalLuminance / (imageData.length / 4);
+      const contrast = maxLum - minLum;
 
-    setLoading(true);
-    setError(null);
+      let lightingStatus = 'Good';
+      let focusStatus = 'Sharp';
+      let isReady = true;
 
-    try {
-      const result = await predictLesion(preview, userData);
-      console.log('API predict result:', result);
-      // pass the original preview image so Results can overlay the heatmap
-      navigate('results', { prediction: result, userData, preview });
-    } catch (err) {
-      setError(`Prediction failed: ${err.message}`);
-      setLoading(false);
-    }
-  };
+      // Threshold adjustments
+      if (avgLuminance < 60) { lightingStatus = 'Too Dark'; isReady = false; }
+      else if (avgLuminance > 210) { lightingStatus = 'Too Bright'; isReady = false; }
 
-  const startCamera = async () => {
-    try {
-      setError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      if (videoRef.current) videoRef.current.srcObject = stream;
-      setCameraActive(true);
-    } catch (e) {
-      setError('Unable to access camera: ' + e.message);
-    }
-  };
+      // Contrast acts as a lightweight mathematical proxy for focus/blur
+      if (contrast < 40) { focusStatus = 'Blurry'; isReady = false; }
 
-  const stopCamera = () => {
-    try {
-      const stream = videoRef.current?.srcObject;
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-      }
-    } catch (e) {
-      // ignore
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setCameraActive(false);
-  };
+      setMetrics({ lighting: lightingStatus, focus: focusStatus, ready: isReady });
+    }
+    
+    // Loop the analysis tightly bound to the browser's render cycle
+    frameIdRef.current = requestAnimationFrame(analyzeFrame);
+  };
 
-  const captureFromCamera = async () => {
-    try {
-      if (!videoRef.current) return;
-      const video = videoRef.current;
-      const w = video.videoWidth || 640;
-      const h = video.videoHeight || 480;
-      if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
-      const canvas = canvasRef.current;
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/png');
-      setPreview(dataUrl);
-      // Stop camera after capture
-      stopCamera();
-
-      // Run image quality check
+  const startCamera = async () => {
     try {
-        const res = await apiFetch(new URL('/image_quality', API_BASE_URL).toString(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: dataUrl })
-        });
-        if (res.ok) {
-          const info = await res.json();
-          setCamSuggestions(info.suggestions || []);
-        }
-      } catch (e) {
-        console.warn('image_quality API failed', e);
-      }
-    } catch (e) {
-      setError('Camera capture failed: ' + e.message);
-    }
-  };
+      setError(null);
+      // Request optimal mobile back camera
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment', width: { ideal: 1280 } }, 
+        audio: false 
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play();
+          analyzeFrame(); // Start AR loop once video plays
+        };
+      }
+      setCameraActive(true);
+    } catch (e) {
+      setError('Unable to access camera. Please check permissions.');
+    }
+  };
 
-  return (
-  <div className="flex flex-col min-h-screen bg-white overflow-auto">
-      <div className="flex items-center p-6 border-b">
-        <button onClick={() => navigate('metadata')} className="text-gray-600 hover:text-gray-900">
-          <ArrowLeft className="w-6 h-6" />
-        </button>
-        <h2 className="flex-1 text-2xl font-bold text-gray-900 ml-4">Upload Lesion Image</h2>
-      </div>
+  const stopCamera = () => {
+    if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
+    const stream = videoRef.current?.srcObject;
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraActive(false);
+  };
 
-      <div className="flex-1 overflow-y-auto p-6 flex flex-col">
-        {/* Image Preview */}
-        {preview ? (
-          <div className="mb-6">
-            <img
-              src={preview}
-              alt="Selected lesion"
-              className="w-full h-64 object-cover rounded-2xl shadow-lg border-2 border-blue-200"
-            />
-            <button
-              onClick={() => {
-                setPreview(null);
-                setImage(null);
-                if (fileInputRef.current) fileInputRef.current.value = '';
-              }}
-              className="w-full mt-4 text-blue-600 hover:text-blue-700 font-semibold py-2"
-            >
-              Change Image
-            </button>
-          </div>
-        ) : (
-          <div className="mb-4">
-            {!cameraActive ? (
-              <div className="flex-1 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50 mb-4 cursor-pointer hover:border-blue-500 hover:bg-blue-100 transition" onClick={() => fileInputRef.current?.click()}>
-                <Camera className="w-16 h-16 text-blue-400 mb-4" />
-                <p className="text-center text-gray-700 font-semibold mb-2">Click to upload image</p>
-                <p className="text-center text-gray-500 text-sm">PNG, JPG up to 10MB</p>
-              </div>
-            ) : (
-              <div className="rounded-2xl overflow-hidden border mb-4">
-                <video ref={videoRef} autoPlay playsInline className="w-full h-64 object-cover bg-black" />
-              </div>
-            )}
+  // Cleanup to prevent memory leaks if user navigates away while camera is on
+  useEffect(() => {
+    return () => stopCamera();
+  }, []);
 
-            <div className="flex gap-3">
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-white border rounded-lg">Upload Image</button>
-              {!cameraActive ? (
-                <button onClick={startCamera} className="flex-1 py-3 bg-blue-600 text-white rounded-lg">Use Camera</button>
-              ) : (
-                <>
-                  <button onClick={captureFromCamera} className="flex-1 py-3 bg-green-600 text-white rounded-lg">Capture</button>
-                  <button onClick={stopCamera} className="flex-1 py-3 bg-red-100 text-red-700 rounded-lg">Stop</button>
-                </>
-              )}
-            </div>
-            {camSuggestions && camSuggestions.length > 0 && (
-              <div className="mt-3 bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-700">
-                <p className="font-semibold">Camera Suggestions:</p>
-                <ul className="list-disc ml-5 mt-2">
-                  {camSuggestions.map((s, i) => <li key={i}>{s}</li>)}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
+  const handleCapture = async () => {
+    if (!preview) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await predictLesion(preview, userData);
+      navigate('results', { prediction: result, userData, preview });
+    } catch (err) {
+      setError(`Analysis failed: ${err.message}`);
+      setLoading(false);
+    }
+  };
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleImageSelect}
-          className="hidden"
-        />
+  const captureFromCamera = async () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    setPreview(canvas.toDataURL('image/png'));
+    stopCamera();
+  };
 
-        {/* Tips */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <p className="text-sm font-semibold text-blue-900 mb-2">💡 Best Practices:</p>
-          <ul className="text-sm text-blue-800 space-y-1 ml-4 list-disc">
-            <li>Clear, well-lit image</li>
-            <li>Focus on the entire lesion</li>
-            <li>Avoid shadows and glare</li>
-          </ul>
-        </div>
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        setError('Image size must be less than 10MB');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => setPreview(event.target.result);
+      reader.readAsDataURL(file);
+    }
+  };
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 flex gap-3">
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-      </div>
+  return (
+    <div className="flex flex-col min-h-screen bg-white">
+      <div className="flex items-center p-6 border-b">
+        <button onClick={() => { stopCamera(); navigate('metadata'); }} className="text-gray-600 hover:text-gray-900">
+          <ArrowLeft className="w-6 h-6" />
+        </button>
+        <h2 className="flex-1 text-2xl font-bold text-gray-900 ml-4">Capture Lesion</h2>
+      </div>
 
-      <div className="flex gap-3 p-6 border-t bg-gray-50">
-        <button 
-          onClick={() => navigate('metadata')} 
-          className="flex-1 border-2 border-gray-300 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-100 transition"
-        >
-          Back
-        </button>
-        <button 
-          onClick={handleCapture}
-          disabled={!preview || loading}
-          className={`flex-1 py-3 rounded-xl font-semibold transition flex items-center justify-center gap-2 ${
-            preview && !loading
-              ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95'
-              : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-          }`}
-        >
-          {loading && <Loader className="w-5 h-5 animate-spin" />}
-          {loading ? 'Analyzing...' : 'Analyze Image'}
-        </button>
-      </div>
-    </div>
-  );
+      <div className="flex-1 p-6 flex flex-col">
+        {/* Viewport */}
+        {preview ? (
+          <div className="mb-6 relative w-full aspect-square bg-black rounded-2xl overflow-hidden border-2 border-gray-200">
+            <img src={preview} alt="Selected" className="absolute inset-0 w-full h-full object-contain" />
+            <button onClick={() => setPreview(null)} className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white px-6 py-2 rounded-full shadow-lg font-bold text-blue-600">
+              Retake
+            </button>
+          </div>
+        ) : (
+          <div className="mb-4 relative w-full aspect-square bg-gray-100 rounded-2xl overflow-hidden border-2 border-gray-300 shadow-inner">
+            {!cameraActive ? (
+               <div className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-200 transition" onClick={() => fileInputRef.current?.click()}>
+                 <Camera className="w-16 h-16 text-gray-400 mb-4" />
+                 <p className="font-semibold text-gray-600">Tap to browse files</p>
+               </div>
+            ) : (
+               <>
+                 <video ref={videoRef} playsInline className="absolute inset-0 w-full h-full object-cover" />
+                 
+                 {/* AR Guidance Targeting Reticle */}
+                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <div className={`w-2/3 aspect-square rounded-full border-4 transition-all duration-300 ${metrics.ready ? 'border-green-500 scale-105 shadow-[0_0_20px_rgba(34,197,94,0.6)]' : 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]'}`}></div>
+                 </div>
+
+                 {/* Real-time Data HUD */}
+                 <div className="absolute top-4 left-4 right-4 flex justify-between gap-2 pointer-events-none">
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold text-white shadow-md ${metrics.lighting === 'Good' ? 'bg-green-600/80' : 'bg-red-600/80'}`}>
+                      Lighting: {metrics.lighting}
+                    </div>
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold text-white shadow-md ${metrics.focus === 'Sharp' ? 'bg-green-600/80' : 'bg-red-600/80'}`}>
+                      Focus: {metrics.focus}
+                    </div>
+                 </div>
+                 
+                 {/* Footer Status */}
+                 <div className="absolute bottom-6 w-full text-center pointer-events-none">
+                    <p className="text-white text-sm font-semibold bg-black/60 inline-block px-4 py-2 rounded-full backdrop-blur-sm">
+                      {metrics.ready ? "Hold steady... Ready to capture." : "Adjust position to fit target"}
+                    </p>
+                 </div>
+               </>
+            )}
+            {/* Hidden canvas for pixel extraction */}
+            <canvas ref={hiddenCanvasRef} width="64" height="64" className="hidden" />
+          </div>
+        )}
+
+        <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+
+        {!preview && (
+          <div className="flex gap-3 mt-4 mb-6">
+            <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-white border-2 border-gray-300 font-semibold text-gray-700 hover:bg-gray-50 rounded-xl transition">
+              Upload Image
+            </button>
+            {!cameraActive ? (
+              <button onClick={startCamera} className="flex-1 py-3 bg-blue-600 font-semibold text-white rounded-xl shadow-md hover:bg-blue-700 transition">
+                Start Camera
+              </button>
+            ) : (
+              <button onClick={captureFromCamera} disabled={!metrics.ready} className={`flex-1 py-3 font-semibold text-white rounded-xl shadow-md transition ${metrics.ready ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400 cursor-not-allowed'}`}>
+                Capture
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Static Tips Below */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+          <p className="text-sm font-semibold text-blue-900 mb-2">💡 Best Practices:</p>
+          <ul className="text-sm text-blue-800 space-y-1 ml-4 list-disc">
+            <li>Ensure the lesion is centered in the circle.</li>
+            <li>Maintain a distance of about 4-6 inches.</li>
+            <li>Avoid shadows directly over the skin.</li>
+          </ul>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 p-4 rounded-xl flex items-center gap-3 border border-red-200 mb-4">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="p-6 border-t bg-gray-50 flex gap-3 mt-auto">
+        <button onClick={() => { stopCamera(); navigate('metadata'); }} className="flex-1 border-2 border-gray-300 py-3 rounded-xl font-semibold text-gray-700 hover:bg-gray-100 transition">
+          Back
+        </button>
+        <button onClick={handleCapture} disabled={!preview || loading} className={`flex-1 py-3 rounded-xl font-semibold flex justify-center items-center gap-2 transition ${preview && !loading ? 'bg-blue-600 text-white shadow-md hover:bg-blue-700 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+          {loading ? <Loader className="w-5 h-5 animate-spin" /> : 'Analyze Image'}
+        </button>
+      </div>
+    </div>
+  );
 };
 
 const PreventiveGuidance = ({ userData, navigate }) => {
@@ -1927,35 +1941,36 @@ const Admin = ({ navigate }) => {
 };
 
 const Results = ({ prediction, userData, navigate, preview }) => {
-  const [showDetails, setShowDetails] = useState(false);
-  const [showHeatmap, setShowHeatmap] = useState(true);
-  const [heatmapOpacity, setHeatmapOpacity] = useState(0.6);
-  const [blendMode, setBlendMode] = useState('screen');
-  const [hueRotate, setHueRotate] = useState(0);
-  const [saturation, setSaturation] = useState(2);
+  const [showDetails, setShowDetails] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [heatmapOpacity, setHeatmapOpacity] = useState(0.6);
+  const [blendMode, setBlendMode] = useState('screen');
+  const [hueRotate, setHueRotate] = useState(0);
+  const [saturation, setSaturation] = useState(2);
 
-  // Support multiple backend response shapes (full result or history_item wrapper)
-  const displayPrediction = prediction?.prediction ?? prediction?.history_item?.prediction ?? 'Unknown';
-  const displayConfidence = prediction?.confidence ?? prediction?.history_item?.confidence ?? 0;
-  const displayId = prediction?.id ?? prediction?.history_item?.id ?? 'n/a';
-  const displayBreakdown = prediction?.confidence_breakdown ?? prediction?.history_item?.confidence_breakdown ?? {};
-  const heatmapSrc = prediction?.heatmap ?? prediction?.history_item?.heatmap ?? null;
-  const confidenceColor = 
-    displayConfidence >= 80 ? 'text-green-600' :
-    displayConfidence >= 60 ? 'text-yellow-600' :
-    'text-orange-600';
+  // Support multiple backend response shapes
+  const displayPrediction = prediction?.prediction ?? prediction?.history_item?.prediction ?? 'Unknown';
+  const displayConfidence = prediction?.confidence ?? prediction?.history_item?.confidence ?? 0;
+  const displayId = prediction?.id ?? prediction?.history_item?.id ?? 'n/a';
+  const displayBreakdown = prediction?.confidence_breakdown ?? prediction?.history_item?.confidence_breakdown ?? {};
+  const heatmapSrc = prediction?.heatmap ?? prediction?.history_item?.heatmap ?? null;
+  
+  const confidenceColor = 
+    displayConfidence >= 80 ? 'text-green-600' :
+    displayConfidence >= 60 ? 'text-yellow-600' :
+    'text-orange-600';
 
-  const riskLevel = 
-    displayPrediction.toLowerCase().includes('melanoma') ? 'HIGH' :
-    displayPrediction.toLowerCase().includes('carcinoma') ? 'MEDIUM' :
-    'LOW';
+  const riskLevel = 
+    displayPrediction.toLowerCase().includes('melanoma') ? 'HIGH' :
+    displayPrediction.toLowerCase().includes('carcinoma') ? 'MEDIUM' :
+    'LOW';
 
-  const riskColor = 
-    riskLevel === 'HIGH' ? 'bg-red-100 border-red-300 text-red-900' :
-    riskLevel === 'MEDIUM' ? 'bg-yellow-100 border-yellow-300 text-yellow-900' :
-    'bg-green-100 border-green-300 text-green-900';
+  const riskColor = 
+    riskLevel === 'HIGH' ? 'bg-red-100 border-red-300 text-red-900' :
+    riskLevel === 'MEDIUM' ? 'bg-yellow-100 border-yellow-300 text-yellow-900' :
+    'bg-green-100 border-green-300 text-green-900';
 
-  // Persist this prediction into per-user local history so each profile sees their own data
+  // Persist this prediction into per-user local history
   useEffect(() => {
     try {
       const cur = JSON.parse(localStorage.getItem('currentUser') || 'null');
@@ -1964,251 +1979,240 @@ const Results = ({ prediction, userData, navigate, preview }) => {
       if (!users[cur.phone]) users[cur.phone] = { name: cur.name, phone: cur.phone };
 
       const histItem = prediction?.history_item ? prediction.history_item : {
-        id: prediction.id || (prediction.history_item && prediction.history_item.id) || `local-${Date.now()}`,
+        id: displayId === 'n/a' ? `local-${Date.now()}` : displayId,
         prediction: displayPrediction,
         confidence: displayConfidence,
         age: userData?.age || '',
         gender: userData?.gender || '',
         location: userData?.location || '',
-        timestamp: prediction.timestamp || new Date().toISOString(),
+        timestamp: prediction?.timestamp || new Date().toISOString(),
         confidence_breakdown: displayBreakdown || {}
       };
 
       users[cur.phone].history = users[cur.phone].history || [];
-      // Avoid duplicate by id
       if (!users[cur.phone].history.find(h => h.id === histItem.id)) {
         users[cur.phone].history.unshift(histItem);
-        // keep recent 200
         users[cur.phone].history = users[cur.phone].history.slice(0, 200);
         localStorage.setItem('users', JSON.stringify(users));
       }
     } catch (e) {
       console.warn('Failed to persist per-user history:', e);
     }
-  }, [prediction]);
+  }, [prediction, displayId, displayPrediction, displayConfidence, userData, displayBreakdown]);
 
   return (
     <div className="flex flex-col items-center justify-center p-6 bg-gradient-to-b from-white to-gray-50 gap-6">
-      {console.log('Results props:', { prediction, userData, preview })}
-      <CheckCircle2 className="w-20 h-20 text-green-500 mb-6 animate-bounce" />
-      
-      <h2 className="text-3xl font-bold text-gray-900 mb-2 text-center">Analysis Complete</h2>
-      <p className="text-gray-500 text-center mb-8">ID: {displayId}</p>
+      <CheckCircle2 className="w-16 h-16 text-green-500 mb-2 animate-bounce" />
+      
+      <h2 className="text-3xl font-bold text-gray-900 mb-1 text-center">Analysis Complete</h2>
+      <p className="text-gray-500 text-center text-sm mb-4">ID: {displayId}</p>
 
-      {/* Main Result */}
-  <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-6 mb-6 border-t-4 border-blue-500">
-        <p className="text-gray-500 text-sm font-semibold mb-2">PREDICTION</p>
-        <h3 className="text-2xl font-bold text-gray-900 mb-4">{displayPrediction}</h3>
-        
-        <div className="flex items-center gap-3 mb-4">
-          <div className="flex-1">
-            <p className="text-xs text-gray-500 mb-1">Confidence Score</p>
-            <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div
-                className={`h-2.5 rounded-full transition-all ${
-                  displayConfidence >= 80 ? 'bg-green-500' :
-                  displayConfidence >= 60 ? 'bg-yellow-500' :
-                  'bg-orange-500'
-                }`}
-                style={{ width: `${displayConfidence}%` }}
-              />
-            </div>
-          </div>
-          <span className={`text-2xl font-bold ${confidenceColor}`}>
-            {displayConfidence}%
-          </span>
-        </div>
-        {/* Confidence Breakdown */}
-        <div className="mt-4">
-          <details className="bg-gray-50 border rounded-lg p-3">
-            <summary className="font-semibold">Confidence Breakdown</summary>
-            <div className="mt-3">
-              {Object.entries(displayBreakdown).length === 0 && <p className="text-sm text-gray-500">No breakdown available.</p>}
-              {Object.entries(displayBreakdown).sort((a,b)=>b[1]-a[1]).map(([cls, val]) => (
-                <div key={cls} className="flex items-center justify-between text-sm py-1">
-                  <div className="text-gray-700">{cls}</div>
-                  <div className="text-gray-900 font-semibold">{val}%</div>
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
+      {/* Main Result Card */}
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-6 mb-2 border-t-4 border-blue-500">
+        <p className="text-gray-500 text-sm font-semibold mb-2">PREDICTION</p>
+        <h3 className="text-2xl font-bold text-gray-900 mb-4">{displayPrediction}</h3>
+        
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex-1">
+            <p className="text-xs text-gray-500 mb-1">Confidence Score</p>
+            <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-1000 ${
+                  displayConfidence >= 80 ? 'bg-green-500' :
+                  displayConfidence >= 60 ? 'bg-yellow-500' :
+                  'bg-orange-500'
+                }`}
+                style={{ width: `${displayConfidence}%` }}
+              />
+            </div>
+          </div>
+          <span className={`text-2xl font-bold ${confidenceColor}`}>
+            {displayConfidence}%
+          </span>
+        </div>
 
-        <div className={`border rounded-lg p-3 ${riskColor} text-center font-semibold`}>
-          Risk Level: {riskLevel}
-        </div>
-      </div>
-      {/* Image + Heatmap Preview */}
+        <div className={`mt-4 border rounded-lg p-3 ${riskColor} text-center font-semibold tracking-wide`}>
+          Risk Level: {riskLevel}
+        </div>
+      </div>
+
+      {/* Clinical Image & Heatmap View */}
       {preview && (
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <p className="text-gray-500 text-sm font-semibold mb-2">IMAGE</p>
-          <div className="relative w-full rounded-2xl overflow-hidden border" style={{paddingTop: '56.25%'}}>
-            <img src={preview} alt="lesion" className="absolute inset-0 w-full h-full object-cover" />
-            {heatmapSrc && showHeatmap && (
-              <img
-                src={heatmapSrc}
-                alt="heatmap"
-                style={{
-                  opacity: heatmapOpacity,
-                  mixBlendMode: blendMode,
-                  filter: `hue-rotate(${hueRotate}deg) saturate(${saturation})`
-                }}
-                className="absolute inset-0 w-full h-full object-cover top-0 left-0 pointer-events-none"
-              />
-            )}
-          </div>
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-6">
+          <p className="text-gray-500 text-sm font-semibold mb-3">CLINICAL VIEW</p>
+          
+          {/* Locked Aspect Ratio Container using object-contain */}
+          <div className="relative w-full aspect-square bg-black rounded-xl overflow-hidden border border-gray-200 shadow-inner">
+            <img 
+              src={preview} 
+              alt="lesion base" 
+              className="absolute inset-0 w-full h-full object-contain" 
+            />
+            
+            {heatmapSrc && showHeatmap && (
+              <img
+                src={heatmapSrc}
+                alt="AI heatmap overlay"
+                style={{
+                  opacity: heatmapOpacity,
+                  mixBlendMode: blendMode,
+                  filter: `hue-rotate(${hueRotate}deg) saturate(${saturation})`
+                }}
+                className="absolute inset-0 w-full h-full object-contain pointer-events-none transition-opacity duration-300"
+              />
+            )}
+          </div>
 
-          {/* Controls: responsive grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-            <div className="flex flex-col gap-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={showHeatmap} onChange={() => setShowHeatmap(s => !s)} className="form-checkbox" />
-                <span>Show Heatmap</span>
-              </label>
-              <div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={heatmapOpacity}
-                  onChange={(e) => setHeatmapOpacity(parseFloat(e.target.value))}
-                  className="w-full"
-                />
-              </div>
-            </div>
+          {/* Interactive Control Deck */}
+          {heatmapSrc && (
+            <div className="mt-5 p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-5">
+              
+              {/* Top Row: Toggle & Blend Mode */}
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 font-semibold text-gray-700 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={showHeatmap} 
+                    onChange={() => setShowHeatmap(!showHeatmap)} 
+                    className="w-4 h-4 rounded text-blue-600 accent-blue-600" 
+                  />
+                  AI Overlay
+                </label>
+                <select 
+                  value={blendMode} 
+                  onChange={(e) => setBlendMode(e.target.value)} 
+                  className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white outline-none cursor-pointer focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="screen">Screen (Highlight)</option>
+                  <option value="multiply">Multiply (Darken)</option>
+                  <option value="overlay">Overlay (Contrast)</option>
+                </select>
+              </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
-              <div className="flex items-center gap-3">
-                <label className="text-sm">Blend Mode:</label>
-                <select value={blendMode} onChange={(e) => setBlendMode(e.target.value)} className="border rounded px-2 py-1 text-sm">
-                  <option value="screen">screen</option>
-                  <option value="multiply">multiply</option>
-                  <option value="overlay">overlay</option>
-                  <option value="soft-light">soft-light</option>
-                </select>
-              </div>
+              {/* Opacity Slider */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex justify-between text-xs font-semibold text-gray-500 uppercase">
+                  <span>Transparent</span>
+                  <span>Opaque</span>
+                </div>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={heatmapOpacity}
+                  onChange={(e) => setHeatmapOpacity(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                />
+              </div>
 
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm">Hue:</label>
-                  <input type="range" min="0" max="360" value={hueRotate} onChange={(e) => setHueRotate(parseInt(e.target.value))} className="w-full" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm">Saturation:</label>
-                  <input type="range" min="0" max="5" step="0.1" value={saturation} onChange={(e) => setSaturation(parseFloat(e.target.value))} className="w-full" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Patient Info */}
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-lg p-6 mb-6">
-        <p className="text-gray-500 text-sm font-semibold mb-4">PATIENT INFORMATION</p>
-        <div className="space-y-3">
-          <div className="flex justify-between items-center py-2 border-b">
-            <span className="text-gray-600">Age</span>
-            <span className="font-semibold text-gray-900">{userData.age} years</span>
-          </div>
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={async () => {
-                try {
-                  const email = JSON.parse(localStorage.getItem('currentUser') || '{}').email;
-                  if (!email) throw new Error('No email available');
-                  await sendNotification(email, 'OncoDetect: Reminder to re-scan', `Please re-scan the lesion with OncoDetect. ID: ${displayId}`);
-                  alert('Reminder scheduled (you will receive an email shortly).');
-                } catch (e) {
-                  alert('Failed to schedule reminder: ' + e.message);
-                }
-              }}
-              className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-semibold"
-            >
-              Remind Me to Re-scan
-            </button>
+              {/* Color Adjustments */}
+              <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-200">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Hue Shift</label>
+                  <input 
+                    type="range" min="0" max="360" step="10" 
+                    value={hueRotate} 
+                    onChange={(e) => setHueRotate(parseInt(e.target.value))} 
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-500" 
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Intensity</label>
+                  <input 
+                    type="range" min="0" max="5" step="0.5" 
+                    value={saturation} 
+                    onChange={(e) => setSaturation(parseFloat(e.target.value))} 
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-500" 
+                  />
+                </div>
+              </div>
 
-            <button onClick={() => navigate('guidance', { userData, prediction })} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-semibold">
-              Preventive Guidance
-            </button>
-          </div>
-          <div className="flex justify-between items-center py-2 border-b">
-            <span className="text-gray-600">Gender</span>
-            <span className="font-semibold text-gray-900 capitalize">{userData.gender}</span>
-          </div>
-          <div className="flex justify-between items-center py-2">
-            <span className="text-gray-600">Location</span>
-            <span className="font-semibold text-gray-900">{userData.location}</span>
-          </div>
-        </div>
-      </div>
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Medical Disclaimer */}
-      <div className="w-full max-w-sm bg-amber-50 border border-amber-300 rounded-lg p-4 mb-6">
-        <p className="text-xs text-amber-900 text-center">
-          ⚠️ This analysis is not a medical diagnosis. Please consult a dermatologist for professional evaluation.
-        </p>
-      </div>
+      {/* Patient Information Panel */}
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-6">
+        <p className="text-gray-500 text-sm font-semibold mb-4">PATIENT INFORMATION</p>
+        <div className="space-y-3">
+          <div className="flex justify-between items-center py-2 border-b border-gray-100">
+            <span className="text-gray-600">Age</span>
+            <span className="font-semibold text-gray-900">{userData.age} years</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b border-gray-100">
+            <span className="text-gray-600">Gender</span>
+            <span className="font-semibold text-gray-900 capitalize">{userData.gender}</span>
+          </div>
+          <div className="flex justify-between items-center py-2">
+            <span className="text-gray-600">Location</span>
+            <span className="font-semibold text-gray-900">{userData.location}</span>
+          </div>
+        </div>
 
-      {/* Action Buttons */}
-      <div className="w-full max-w-sm space-y-3">
-        <button
-          onClick={() => setShowDetails(!showDetails)}
-          className="w-full border-2 border-blue-300 text-blue-600 py-3 rounded-xl font-semibold hover:bg-blue-50 transition flex items-center justify-center gap-2"
-        >
-          {showDetails ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-          {showDetails ? 'Hide Details' : 'View Details'}
-        </button>
+        <div className="flex gap-3 mt-5">
+          <button 
+            onClick={() => navigate('guidance', { userData, prediction })} 
+            className="flex-1 py-3 bg-green-50 text-green-700 border border-green-200 rounded-xl font-semibold hover:bg-green-100 transition"
+          >
+            Care Guidance
+          </button>
+        </div>
+      </div>
 
-        <button
-          onClick={() => downloadReport(prediction, userData)}
-          className="w-full border-2 border-green-300 text-green-600 py-3 rounded-xl font-semibold hover:bg-green-50 transition flex items-center justify-center gap-2"
-        >
-          <Download className="w-5 h-5" />
-          Download Report
-        </button>
+      {/* Medical Disclaimer */}
+      <div className="w-full max-w-md bg-amber-50 border border-amber-300 rounded-lg p-4">
+        <p className="text-xs text-amber-900 text-center leading-relaxed">
+          ⚠️ This analysis is generated by AI and is not a medical diagnosis. Please consult a board-certified dermatologist for professional evaluation.
+        </p>
+      </div>
 
-        <button
-          onClick={() => navigate('assistant', { prediction, userData, preview })}
-          className="w-full border-2 border-purple-300 text-purple-600 py-3 rounded-xl font-semibold hover:bg-purple-50 transition flex items-center justify-center gap-2"
-        >
-          <MessageSquare className="w-5 h-5" />
-          Ask Assistant
-        </button>
+      {/* Action Dashboard */}
+      <div className="w-full max-w-md space-y-3 mb-8">
+        <button
+          onClick={() => setShowDetails(!showDetails)}
+          className="w-full border-2 border-blue-300 text-blue-600 py-3 rounded-xl font-semibold hover:bg-blue-50 transition flex items-center justify-center gap-2"
+        >
+          {showDetails ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+          {showDetails ? 'Hide Statistical Breakdown' : 'View Statistical Breakdown'}
+        </button>
 
-        <button
-          onClick={() => navigate('landing')}
-          className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center justify-center gap-2"
-        >
-          <RefreshCcw className="w-5 h-5" />
-          New Assessment
-        </button>
-      </div>
+        {showDetails && (
+          <div className="bg-white rounded-xl shadow-inner border border-gray-200 p-5 mb-4">
+            {Object.entries(displayBreakdown).length > 0 ? (
+              Object.entries(displayBreakdown).sort(([,a], [,b]) => b - a).map(([cls, conf]) => (
+                <div key={cls} className="mb-3 last:mb-0">
+                  <div className="flex justify-between mb-1.5">
+                    <span className="text-sm font-medium text-gray-700">{cls}</span>
+                    <span className="text-sm font-bold text-gray-900">{conf}%</span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2">
+                    <div className="h-2 rounded-full bg-blue-500" style={{ width: `${conf}%` }} />
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-gray-500 text-center">No statistical breakdown available.</p>
+            )}
+          </div>
+        )}
 
-      {/* Detailed Breakdown */}
-      {showDetails && (
-        <div className="w-full max-w-sm mt-6 bg-white rounded-2xl shadow-lg p-6">
-          <p className="text-gray-500 text-sm font-semibold mb-4">CONFIDENCE BREAKDOWN</p>
-          <div className="space-y-3">
-            {Object.entries(displayBreakdown || {}).sort(([,a], [,b]) => b - a).map(([cls, conf]) => (
-              <div key={cls}>
-                <div className="flex justify-between mb-1">
-                  <span className="text-sm font-medium text-gray-700">{cls}</span>
-                  <span className="text-sm font-semibold text-gray-900">{conf}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="h-2 rounded-full bg-blue-500"
-                    style={{ width: `${conf}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+        <button
+          onClick={() => navigate('assistant', { prediction, userData, preview })}
+          className="w-full border-2 border-purple-300 text-purple-700 bg-purple-50 py-3 rounded-xl font-semibold hover:bg-purple-100 transition flex items-center justify-center gap-2"
+        >
+          <MessageSquare className="w-5 h-5" />
+          Discuss with AI Assistant
+        </button>
+
+        <button
+          onClick={() => navigate('landing')}
+          className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold shadow-md hover:bg-blue-700 transition flex items-center justify-center gap-2"
+        >
+          <RefreshCcw className="w-5 h-5" />
+          Start New Assessment
+        </button>
+      </div>
+    </div>
+  );
 };
 
 const Statistics = ({ navigate, currentUser }) => {
