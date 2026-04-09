@@ -1,0 +1,17 @@
+# Exclude Python virtual environments and editor files to keep build context small
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+sc_app/venv
+node_modules
+.git
+.idea
+.vscode
+.DS_Store
+*.log
+.env
+*.sqlite3
+*.tgz
+*.zip
+*.tar.gz

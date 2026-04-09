@@ -1,0 +1,74 @@
+{
+  "MEL": {
+    "condition": "Melanoma",
+    "summary": "Melanoma is a potentially aggressive skin cancer arising from melanocytes. Early detection and biopsy of suspicious lesions improves outcomes.",
+    "sources": [
+      "https://www.cancer.org/cancer/melanoma-skin-cancer.html",
+      "https://www.dermnetnz.org/topics/melanoma/"
+    ],
+    "triage": "Refer to dermatology for dermoscopy and possible biopsy when lesion shows asymmetry, border irregularity, color variegation, diameter growth, or evolving features."
+  },
+  "BCC": {
+    "condition": "Basal Cell Carcinoma",
+    "summary": "Basal cell carcinoma is a common skin cancer that is locally invasive but rarely metastasizes. Clinical assessment and histopathology confirm diagnosis.",
+    "sources": [
+      "https://www.cancer.org/cancer/basal-and-squamous-cell-skin-cancer.html",
+      "https://www.dermnetnz.org/topics/basal-cell-carcinoma/"
+    ],
+    "triage": "Recommend dermatology evaluation; treatment often involves local excision or topical/ablative therapies."
+  },
+  "SCC": {
+    "condition": "Squamous Cell Carcinoma",
+    "summary": "Squamous cell carcinoma can be more aggressive than BCC and has a higher risk of metastasis. Lesions that are ulcerated, rapidly growing, or symptomatic require prompt evaluation.",
+    "sources": [
+      "https://www.cancer.org/cancer/squamous-cell-skin-cancer.html",
+      "https://www.ncbi.nlm.nih.gov/books/NBK470464/"
+    ],
+    "triage": "Urgent dermatology review recommended for suspicious features; biopsy often indicated."
+  },
+  "NV": {
+    "condition": "Nevus (Mole)",
+    "summary": "Common benign melanocytic nevi (moles). Most are benign but changes over time can signal concern.",
+    "sources": [
+      "https://www.aad.org/public/diseases/skin-cancer/types/common-moles",
+      "https://www.dermnetnz.org/topics/naevi/"
+    ],
+    "triage": "Self-monitoring and periodic photography; seek clinician review for evolving or symptomatic lesions."
+  },
+  "AKIEC": {
+    "condition": "Actinic Keratosis / Related Lesion",
+    "summary": "Actinic keratoses are sun-damaged precancerous lesions; some may progress to squamous cell carcinoma.",
+    "sources": [
+      "https://www.aad.org/public/diseases/skin-cancer/prevention/actinic-keratosis",
+      "https://www.dermnetnz.org/topics/actinic-keratosis/"
+    ],
+    "triage": "Dermatology assessment recommended for suspicious or persistent lesions; consider treatment to reduce progression risk."
+  },
+  "BKL": {
+    "condition": "Benign Keratosis",
+    "summary": "Seborrheic keratoses are benign epidermal tumors; typically harmless but may be removed for symptoms or diagnostic uncertainty.",
+    "sources": [
+      "https://www.aad.org/public/diseases/benign-skin-growths/seborrheic-keratosis",
+      "https://www.dermnetnz.org/topics/seborrhoeic-keratosis/"
+    ],
+    "triage": "Generally benign; consider clinician review if changing or symptomatic."
+  },
+  "DF": {
+    "condition": "Dermatofibroma",
+    "summary": "Dermatofibromas are common benign fibrous nodules; usually harmless and monitored clinically.",
+    "sources": [
+      "https://www.aad.org/public/diseases/benign-skin-growths/dermatofibroma",
+      "https://www.dermnetnz.org/topics/dermatofibroma/"
+    ],
+    "triage": "Monitor clinically; refer if atypical features or patient concern."
+  },
+  "VASC": {
+    "condition": "Vascular Lesion",
+    "summary": "Vascular lesions include hemangiomas and angiomas; most are benign but may require evaluation if changing or symptomatic.",
+    "sources": [
+      "https://www.aad.org/public/diseases/vascular/hemangioma",
+      "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3001338/"
+    ],
+    "triage": "Clinical review advised for evolving or symptomatic vascular lesions."
+  }
+}

@@ -1,0 +1,602 @@
+[
+  {
+    "id": "fbcc42fd",
+    "prediction": "Nevus",
+    "confidence": 87.51,
+    "raw_class": "NV",
+    "age": "30",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T00:13:52.475960",
+    "confidence_breakdown": {
+      "AKIEC": 2.17,
+      "BCC": 1.13,
+      "BKL": 3.27,
+      "DF": 0.54,
+      "MEL": 2.3,
+      "NV": 87.51,
+      "SCC": 1.4,
+      "VASC": 1.66
+    }
+  },
+  {
+    "id": "9bf01ed0",
+    "prediction": "Nevus",
+    "confidence": 82.29,
+    "raw_class": "NV",
+    "age": "22",
+    "gender": "female",
+    "location": "Lower Extremity",
+    "timestamp": "2026-04-01T00:41:13.906688",
+    "confidence_breakdown": {
+      "AKIEC": 1.32,
+      "BCC": 1.56,
+      "BKL": 1.53,
+      "DF": 5.47,
+      "MEL": 4.64,
+      "NV": 82.29,
+      "SCC": 1.53,
+      "VASC": 1.65
+    }
+  },
+  {
+    "id": "c4466198",
+    "prediction": "Nevus",
+    "confidence": 60.62,
+    "raw_class": "NV",
+    "age": "12",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T00:57:49.464232",
+    "confidence_breakdown": {
+      "AKIEC": 0.3,
+      "BCC": 0.79,
+      "BKL": 8.93,
+      "DF": 0.37,
+      "MEL": 26.78,
+      "NV": 60.62,
+      "SCC": 0.21,
+      "VASC": 1.99
+    }
+  },
+  {
+    "id": "50e28184",
+    "prediction": "Nevus",
+    "confidence": 83.2,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:00:37.767127",
+    "confidence_breakdown": {
+      "AKIEC": 4.06,
+      "BCC": 1.93,
+      "BKL": 3.02,
+      "DF": 0.9,
+      "MEL": 4.32,
+      "NV": 83.2,
+      "SCC": 0.9,
+      "VASC": 1.67
+    }
+  },
+  {
+    "id": "71ae16d1",
+    "prediction": "Nevus",
+    "confidence": 83.2,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:02:59.293881",
+    "confidence_breakdown": {
+      "AKIEC": 4.06,
+      "BCC": 1.93,
+      "BKL": 3.02,
+      "DF": 0.9,
+      "MEL": 4.32,
+      "NV": 83.2,
+      "SCC": 0.9,
+      "VASC": 1.67
+    }
+  },
+  {
+    "id": "6f485fcd",
+    "prediction": "Nevus",
+    "confidence": 84.74,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:03:18.656563",
+    "confidence_breakdown": {
+      "AKIEC": 5.18,
+      "BCC": 1.5,
+      "BKL": 3.96,
+      "DF": 0.66,
+      "MEL": 1.75,
+      "NV": 84.74,
+      "SCC": 1.35,
+      "VASC": 0.86
+    }
+  },
+  {
+    "id": "37045460",
+    "prediction": "Nevus",
+    "confidence": 57.86,
+    "raw_class": "NV",
+    "age": "111",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:08:34.484061",
+    "confidence_breakdown": {
+      "AKIEC": 0.94,
+      "BCC": 1.38,
+      "BKL": 30.02,
+      "DF": 0.2,
+      "MEL": 7.22,
+      "NV": 57.86,
+      "SCC": 1.11,
+      "VASC": 1.26
+    }
+  },
+  {
+    "id": "bca4e103",
+    "prediction": "Nevus",
+    "confidence": 61.63,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:11:59.190454",
+    "confidence_breakdown": {
+      "AKIEC": 0.29,
+      "BCC": 0.78,
+      "BKL": 8.65,
+      "DF": 0.36,
+      "MEL": 26.11,
+      "NV": 61.63,
+      "SCC": 0.21,
+      "VASC": 1.98
+    }
+  },
+  {
+    "id": "b950281c",
+    "prediction": "Melanoma",
+    "confidence": 42.61,
+    "raw_class": "MEL",
+    "age": "33",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:16:27.109469",
+    "confidence_breakdown": {
+      "AKIEC": 0.57,
+      "BCC": 1.15,
+      "BKL": 16.25,
+      "DF": 0.75,
+      "MEL": 42.61,
+      "NV": 35.8,
+      "SCC": 0.4,
+      "VASC": 2.47
+    }
+  },
+  {
+    "id": "d7975e4f",
+    "prediction": "Nevus",
+    "confidence": 83.83,
+    "raw_class": "NV",
+    "age": "12",
+    "gender": "female",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:18:13.818783",
+    "confidence_breakdown": {
+      "AKIEC": 3.93,
+      "BCC": 1.9,
+      "BKL": 2.82,
+      "DF": 0.73,
+      "MEL": 4.39,
+      "NV": 83.83,
+      "SCC": 0.6,
+      "VASC": 1.78
+    }
+  },
+  {
+    "id": "795f0e35",
+    "prediction": "Nevus",
+    "confidence": 83.2,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:20:00.101179",
+    "confidence_breakdown": {
+      "AKIEC": 4.06,
+      "BCC": 1.93,
+      "BKL": 3.02,
+      "DF": 0.9,
+      "MEL": 4.32,
+      "NV": 83.2,
+      "SCC": 0.9,
+      "VASC": 1.67
+    }
+  },
+  {
+    "id": "4395a347",
+    "prediction": "Nevus",
+    "confidence": 49.59,
+    "raw_class": "NV",
+    "age": "22",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:27:33.804662",
+    "confidence_breakdown": {
+      "AKIEC": 0.43,
+      "BCC": 0.98,
+      "BKL": 12.18,
+      "DF": 0.52,
+      "MEL": 33.78,
+      "NV": 49.59,
+      "SCC": 0.29,
+      "VASC": 2.24
+    }
+  },
+  {
+    "id": "47629457",
+    "prediction": "Nevus",
+    "confidence": 76.33,
+    "raw_class": "NV",
+    "age": "55",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:30:51.892616",
+    "confidence_breakdown": {
+      "AKIEC": 4.93,
+      "BCC": 2.41,
+      "BKL": 4.78,
+      "DF": 0.65,
+      "MEL": 8.26,
+      "NV": 76.33,
+      "SCC": 1.22,
+      "VASC": 1.43
+    }
+  },
+  {
+    "id": "6cd020df",
+    "prediction": "Nevus",
+    "confidence": 87.94,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:33:49.325647",
+    "confidence_breakdown": {
+      "AKIEC": 1.99,
+      "BCC": 1.13,
+      "BKL": 3.06,
+      "DF": 0.62,
+      "MEL": 2.15,
+      "NV": 87.94,
+      "SCC": 1.36,
+      "VASC": 1.76
+    }
+  },
+  {
+    "id": "70b4814e",
+    "prediction": "Nevus",
+    "confidence": 83.2,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T01:36:03.768341",
+    "confidence_breakdown": {
+      "AKIEC": 4.06,
+      "BCC": 1.93,
+      "BKL": 3.02,
+      "DF": 0.9,
+      "MEL": 4.32,
+      "NV": 83.2,
+      "SCC": 0.9,
+      "VASC": 1.67
+    }
+  },
+  {
+    "id": "92d99d39",
+    "prediction": "Nevus",
+    "confidence": 83.2,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T10:01:11.892904",
+    "confidence_breakdown": {
+      "AKIEC": 4.06,
+      "BCC": 1.93,
+      "BKL": 3.02,
+      "DF": 0.9,
+      "MEL": 4.32,
+      "NV": 83.2,
+      "SCC": 0.9,
+      "VASC": 1.67
+    }
+  },
+  {
+    "id": "91c2b736",
+    "prediction": "Nevus",
+    "confidence": 82.83,
+    "raw_class": "NV",
+    "age": "45",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-01T10:19:16.137247",
+    "confidence_breakdown": {
+      "AKIEC": 6.13,
+      "BCC": 1.8,
+      "BKL": 2.16,
+      "DF": 0.67,
+      "MEL": 3.96,
+      "NV": 82.83,
+      "SCC": 1.11,
+      "VASC": 1.34
+    }
+  },
+  {
+    "id": "509c4848",
+    "prediction": "Melanoma",
+    "confidence": 75.54,
+    "raw_class": "MEL",
+    "age": "55",
+    "gender": "female",
+    "location": "Upper Extremity",
+    "timestamp": "2026-04-01T11:02:50.915435",
+    "confidence_breakdown": {
+      "AKIEC": 0.15,
+      "BCC": 0.7,
+      "BKL": 5.16,
+      "DF": 2.33,
+      "MEL": 75.54,
+      "NV": 13.6,
+      "SCC": 0.65,
+      "VASC": 1.86
+    }
+  },
+  {
+    "id": "2bdfaf58",
+    "prediction": "Nevus",
+    "confidence": 77.08,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "female",
+    "location": "Upper Extremity",
+    "timestamp": "2026-04-07T19:22:21.151684",
+    "confidence_breakdown": {
+      "AKIEC": 2.54,
+      "BCC": 2.51,
+      "BKL": 2.19,
+      "DF": 4.09,
+      "MEL": 7.23,
+      "NV": 77.08,
+      "SCC": 1.66,
+      "VASC": 2.71
+    }
+  },
+  {
+    "id": "24113151",
+    "prediction": "Nevus",
+    "confidence": 82.86,
+    "raw_class": "NV",
+    "age": "22",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-08T13:25:49.130738",
+    "confidence_breakdown": {
+      "AKIEC": 4.16,
+      "BCC": 1.89,
+      "BKL": 3.14,
+      "DF": 0.77,
+      "MEL": 4.65,
+      "NV": 82.86,
+      "SCC": 0.91,
+      "VASC": 1.62
+    }
+  },
+  {
+    "id": "a8849d7d",
+    "prediction": "Nevus",
+    "confidence": 46.29,
+    "raw_class": "NV",
+    "age": "23",
+    "gender": "female",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-08T13:28:25.438953",
+    "confidence_breakdown": {
+      "AKIEC": 0.41,
+      "BCC": 1.02,
+      "BKL": 12.02,
+      "DF": 0.38,
+      "MEL": 37.51,
+      "NV": 46.29,
+      "SCC": 0.19,
+      "VASC": 2.17
+    }
+  },
+  {
+    "id": "73680ba6",
+    "prediction": "Nevus",
+    "confidence": 60.0,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "female",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-09T16:27:43.813554",
+    "confidence_breakdown": {
+      "AKIEC": 0.29,
+      "BCC": 0.82,
+      "BKL": 8.24,
+      "DF": 0.3,
+      "MEL": 28.27,
+      "NV": 60.0,
+      "SCC": 0.14,
+      "VASC": 1.95
+    }
+  },
+  {
+    "id": "9cdb4501",
+    "prediction": "Nevus",
+    "confidence": 79.66,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-09T16:28:34.816628",
+    "confidence_breakdown": {
+      "AKIEC": 0.74,
+      "BCC": 0.46,
+      "BKL": 12.18,
+      "DF": 0.91,
+      "MEL": 1.81,
+      "NV": 79.66,
+      "SCC": 0.31,
+      "VASC": 3.94
+    }
+  },
+  {
+    "id": "5a41ffe8",
+    "prediction": "Nevus",
+    "confidence": 47.62,
+    "raw_class": "NV",
+    "age": "22",
+    "gender": "female",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-09T16:37:33.994891",
+    "confidence_breakdown": {
+      "AKIEC": 0.4,
+      "BCC": 1.0,
+      "BKL": 11.63,
+      "DF": 0.37,
+      "MEL": 36.65,
+      "NV": 47.62,
+      "SCC": 0.19,
+      "VASC": 2.16
+    }
+  },
+  {
+    "id": "0fd55c5d",
+    "prediction": "Nevus",
+    "confidence": 60.0,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "female",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-09T16:42:41.278322",
+    "confidence_breakdown": {
+      "AKIEC": 0.29,
+      "BCC": 0.82,
+      "BKL": 8.24,
+      "DF": 0.3,
+      "MEL": 28.27,
+      "NV": 60.0,
+      "SCC": 0.14,
+      "VASC": 1.95
+    }
+  },
+  {
+    "id": "6a7a5d24",
+    "prediction": "Nevus",
+    "confidence": 87.18,
+    "raw_class": "NV",
+    "age": "12",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-09T16:45:45.390202",
+    "confidence_breakdown": {
+      "AKIEC": 1.8,
+      "BCC": 1.72,
+      "BKL": 3.76,
+      "DF": 0.92,
+      "MEL": 1.23,
+      "NV": 87.18,
+      "SCC": 0.98,
+      "VASC": 2.41
+    }
+  },
+  {
+    "id": "c8d75711",
+    "prediction": "Nevus",
+    "confidence": 85.05,
+    "raw_class": "NV",
+    "age": "12",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-09T16:46:07.367680",
+    "confidence_breakdown": {
+      "AKIEC": 2.14,
+      "BCC": 0.86,
+      "BKL": 2.19,
+      "DF": 0.5,
+      "MEL": 6.66,
+      "NV": 85.05,
+      "SCC": 1.19,
+      "VASC": 1.41
+    }
+  },
+  {
+    "id": "c65597f0",
+    "prediction": "Nevus",
+    "confidence": 38.65,
+    "raw_class": "NV",
+    "age": "30",
+    "gender": "female",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-09T16:49:03.528666",
+    "confidence_breakdown": {
+      "AKIEC": 10.24,
+      "BCC": 18.2,
+      "BKL": 30.96,
+      "DF": 0.15,
+      "MEL": 0.97,
+      "NV": 38.65,
+      "SCC": 0.57,
+      "VASC": 0.26
+    }
+  },
+  {
+    "id": "0074bb6a",
+    "prediction": "Nevus",
+    "confidence": 88.18,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Lower Extremity",
+    "timestamp": "2026-04-09T16:52:07.883194",
+    "confidence_breakdown": {
+      "AKIEC": 0.06,
+      "BCC": 0.32,
+      "BKL": 0.62,
+      "DF": 4.59,
+      "MEL": 5.42,
+      "NV": 88.18,
+      "SCC": 0.45,
+      "VASC": 0.36
+    }
+  },
+  {
+    "id": "bd905ba3",
+    "prediction": "Nevus",
+    "confidence": 90.28,
+    "raw_class": "NV",
+    "age": "11",
+    "gender": "male",
+    "location": "Head & Neck",
+    "timestamp": "2026-04-09T17:01:05.823138",
+    "confidence_breakdown": {
+      "AKIEC": 0.31,
+      "BCC": 0.53,
+      "BKL": 5.05,
+      "DF": 0.61,
+      "MEL": 2.37,
+      "NV": 90.28,
+      "SCC": 0.22,
+      "VASC": 0.63
+    }
+  }
+]

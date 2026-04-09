@@ -1,0 +1,31 @@
+# --- Web Server Requirements ---
+fastapi==0.110.0
+uvicorn==0.29.0
+pydantic==2.6.4
+python-multipart==0.0.9
+
+# --- Database ---
+motor==3.3.2
+dnspython==2.6.1
+
+# --- Core ML Requirements ---
+timm==1.0.26
+pillow==12.1.1
+onnxruntime==1.17.1
+numpy==1.26.4
+
+# --- PyTorch (CPU wheels) ---
+# Use the official PyTorch CPU wheels repository
+# The +cpu variants will be resolved when using the -f index in pip
+# --- PyTorch (CPU wheels) ---
+# Use the official PyTorch CPU wheels repository. Do NOT include the
+# "+cpu" suffix here — pip will select the correct wheel from the
+# PyTorch CPU index provided during the Docker build.
+# PyTorch is provided by the base image (pytorch/pytorch:2.5.1-cpu)
+# Remove torch packages here to avoid downloading large wheels during build.
+
+python-dotenv==1.0.0
+requests==2.31.0
+
+# Note: The Dockerfile will use the official PyTorch CPU wheel index
+# during installation so the +cpu wheels can be resolved.

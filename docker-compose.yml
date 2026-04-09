@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  sc_app:
+    build:
+      context: ./sc_app
+      dockerfile: Dockerfile.prod
+    image: oncodetect-api:local
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./sc_app/.env
+    volumes:
+      - ./sc_app/data:/app/data
+      - ./sc_app/edgefusion_v3_hybrid_champion.pth:/app/edgefusion_v3_hybrid_champion.pth:ro
+    restart: unless-stopped

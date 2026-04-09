@@ -1,0 +1,51 @@
+# Production-oriented Dockerfile for OncoDetect backend
+# - runs as non-root user
+# - keeps layers small
+FROM python:3.11-slim
+
+LABEL maintainer="OncoDetect"
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    POETRY_VIRTUALENVS_CREATE=false
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    build-essential \
+    libopenblas-dev \
+    ca-certificates \
+    git \
+    wget \
+  && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user
+RUN useradd --create-home --shell /bin/sh oncodetect
+
+WORKDIR /app
+
+# Copy and install requirements first to leverage layer caching
+# Support an optional CPU-optimized requirements file to install smaller
+# CPU-only PyTorch wheels. Build with `--build-arg USE_CPU=1` to prefer
+# the `requirements-cpu.txt` file when present.
+ARG USE_CPU=1
+COPY requirements.txt /app/requirements.txt
+COPY requirements-cpu.txt /app/requirements-cpu.txt
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    if [ "${USE_CPU}" = "1" ] && [ -f /app/requirements-cpu.txt ]; then \
+      pip install --no-cache-dir --timeout 120 --retries 5 -r /app/requirements-cpu.txt -f https://download.pytorch.org/whl/cpu/torch_stable.html ; \
+    else \
+      pip install --no-cache-dir --timeout 120 --retries 5 -r /app/requirements.txt ; \
+    fi
+
+# Copy app sources and model file; set ownership to non-root user
+COPY --chown=oncodetect:oncodetect . /app
+
+USER oncodetect
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD python -c "import urllib.request, sys; \
+try: urllib.request.urlopen('http://localhost:8000/health', timeout=5); sys.exit(0) \
+except Exception as e: print(e); sys.exit(1)"
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
