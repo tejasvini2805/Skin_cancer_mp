@@ -153,6 +153,52 @@ async def assistant_analyze(payload: Dict):
             return {"assistant_text": f"AI Error: {error_msg}"}
     except Exception as e:
         return {"assistant_text": f"Connection Error: {str(e)}"}
+# --- Add these after your /assistant/analyze endpoint ---
+
+@app.post("/send_sms_code")
+async def send_sms_code(request: PhoneRequest):
+    # Generate a 6-digit code
+    code = f"{random.randint(100000, 999999)}"
+    
+    # Store it in memory (Note: In production, use Redis or a DB)
+    verification_codes_phone[request.phone_number] = code
+    
+    # Check for Dummy Mode (Dev testing)
+    if os.getenv("DUMMY_SMS") == '1':
+        logger.info(f"DUMMY SMS to {request.phone_number}: {code}")
+        return {"status": "code_sent", "code": code}
+    
+    # Real Twilio Logic
+    try:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{os.getenv('TWILIO_ACCOUNT_SID')}/Messages.json"
+        data = {
+            'From': os.getenv('TWILIO_FROM_NUMBER'),
+            'To': request.phone_number,
+            'Body': f"Your OncoDetect code is: {code}"
+        }
+        resp = requests.post(
+            url, 
+            data=data, 
+            auth=(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN')),
+            timeout=10
+        )
+        if resp.status_code < 300:
+            return {"status": "code_sent"}
+        else:
+            logger.error(f"Twilio Error: {resp.text}")
+            raise HTTPException(status_code=500, detail="Failed to send SMS via Twilio")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/verify_phone_code")
+async def verify_phone_code(request: VerifyPhoneRequest):
+    stored_code = verification_codes_phone.get(request.phone_number)
+    if stored_code and stored_code == request.code:
+        # Success! Remove code so it can't be reused
+        verification_codes_phone.pop(request.phone_number, None)
+        return {"status": "verified"}
+    
+    raise HTTPException(status_code=400, detail="Invalid or expired verification code")
 
 @app.post("/predict")
 async def predict(request: Request, file: UploadFile = File(None), age: str = Form("0"), gender: str = Form("unknown"), location: str = Form("unknown")):
